@@ -1,0 +1,49 @@
+class KeywordAnalyzer:
+    """
+    Segments a user query into valid space-separated sentences 
+    using a dictionary of marketing keywords.
+    """
+    def __init__(self, dictionary):
+        self.word_bank = set(dictionary)
+        self.history = {}
+
+    def segment_query(self, text):
+        if text in self.history:
+            return self.history[text]
+        
+        if not text:
+            return [""]
+
+        valid_sentences = []
+
+        for i in range(1, len(text) + 1):
+            current_chunk = text[:i]
+            
+            if current_chunk in self.word_bank:
+                remaining_parts = self.segment_query(text[i:])
+                
+                for part in remaining_parts:
+                    combined = (current_chunk + " " + part).strip()
+                    valid_sentences.append(combined)
+
+        self.history[text] = valid_sentences
+        return valid_sentences
+
+# Execution Logic 
+if __name__ == "__main__":
+    # Test Data
+    marketing_dict = ["nepal", "trekking", "guide", "nepaltrekking", "visit", 
+                      "kathmandu", "visitkathmandu", "kathmandunepal"]
+    
+    analyzer = KeywordAnalyzer(marketing_dict)
+
+    # Example 1: Nepal Trekking
+    print("Ex1:", analyzer.segment_query("nepaltrekkingguide"))
+    
+    # Example 2: Visit Kathmandu
+    print("Ex2:", analyzer.segment_query("visitkathmandunepal"))
+
+    # Example 3: No valid segmentation
+    print("Ex3:", analyzer.segment_query("everesthikingtrail"))
+
+
