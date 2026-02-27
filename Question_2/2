@@ -1,0 +1,50 @@
+class TreeNode:
+    def __init__(self, val=0, left=None, right=None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+class HydropowerOptimizer:
+    def __init__(self):
+        self.overall_max = float('-inf')
+
+    def calculate_peak_output(self, plant):
+        self._compute_path_sum(plant)
+        return self.overall_max
+
+    def _compute_path_sum(self, site):
+        if not site:
+            return 0
+        
+        left_branch = max(self._compute_path_sum(site.left), 0)
+        right_branch = max(self._compute_path_sum(site.right), 0)
+        
+        local_path_total = site.val + left_branch + right_branch
+        
+        if local_path_total > self.overall_max:
+            self.overall_max = local_path_total
+            
+        return site.val + max(left_branch, right_branch)
+
+# Testing and Validation Starts Here 
+if __name__ == "__main__":
+    solver = HydropowerOptimizer()
+
+    # Test Case 1: Simple tree
+    r1 = TreeNode(1, TreeNode(2), TreeNode(3))
+    print(f"Example 1 Result: {solver.calculate_peak_output(r1)}")
+
+    # Test Case 2: Tree with negative root and deeper branches
+    solver.overall_max = float('-inf')
+    r2 = TreeNode(-10, TreeNode(9), 
+                  TreeNode(20, TreeNode(15), TreeNode(7)))
+    print(f"Example 2 Result: {solver.calculate_peak_output(r2)}")
+
+    # Test Case 3: Single negative node
+    solver.overall_max = float('-inf')
+    print(f"Single Node Result: {solver.calculate_peak_output(TreeNode(-5))}")
+
+    # Test Case 4: All nodes are negative
+    solver.overall_max = float('-inf')
+    r4 = TreeNode(-1, TreeNode(-2), TreeNode(-3))
+    print(f"All Negative Result: {solver.calculate_peak_output(r4)}")
