@@ -1,0 +1,169 @@
+import math
+import itertools
+import tkinter as tk
+from tkinter import messagebox
+import matplotlib
+matplotlib.use("TkAgg")
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+# Dataset of Kathmandu tourist locations
+LOCATIONS = [
+    {"name":"Pashupatinath Temple","lat":27.7104,"lon":85.3488, "fee":100,"tags":["culture","religious"]},
+    {"name":"Swayambhunath Stupa", "lat":27.7149,"lon":85.2906, "fee":200,"tags":["culture","heritage"]},
+    {"name":"Garden of Dreams", "lat":27.7125,"lon":85.3170, "fee":150,"tags":["nature","relaxation"]},
+    {"name":"Chandragiri Hills", "lat":27.6616,"lon":85.2458, "fee":700,"tags":["nature","adventure"]},
+    {"name":"Kathmandu Durbar Sq.","lat":27.7048,"lon":85.3076, "fee":100,"tags":["culture","heritage"]},
+]
+
+STAY_TIME = 1.0  # hours per spot
+AVG_SPEED = 40.0  # km/h
+KM_PER_DEGREE = 111.0
+
+class ItineraryEngine:
+    @staticmethod
+    def get_duration(p1, p2):
+        if not p1 or not p2: return 0.0
+        # Haversine-lite distance calculation
+        lon_dist = (p1["lon"] - p2["lon"]) * KM_PER_DEGREE * math.cos(math.radians(p1["lat"]))
+        lat_dist = (p1["lat"] - p2["lat"]) * KM_PER_DEGREE
+        return math.hypot(lon_dist, lat_dist) / AVG_SPEED
+
+    @staticmethod
+    def get_utility(spot, user_interests):
+        return sum(1 for tag in user_interests if tag in spot["tags"])
+
+    def greedy_search(self, budget, max_hours, interests):
+        unvisited = list(LOCATIONS)
+        path, total_cost, time_spent, log = [], 0.0, 0.0, []
+        current_loc = None
+
+        while unvisited:
+            # Filter by constraints
+            valid_options = [
+                loc for loc in unvisited
+                if total_cost + loc["fee"] <= budget and
+                time_spent + STAY_TIME + self.get_duration(current_loc, loc) <= max_hours
+            ]
+            
+            if not valid_options: break
+
+            # Select best based on utility/cost/time ratio
+            target = max(valid_options, key=lambda x: self.get_utility(x, interests) / 
+                         ((1 + x["fee"]) * (1 + self.get_duration(current_loc, x))))
+
+            drive_time = self.get_duration(current_loc, target)
+            time_spent += drive_time + STAY_TIME
+            total_cost += target["fee"]
+            
+            log.append(f"Reached '{target['name']}' | Match: {self.get_utility(target, interests)} | Fee: {target['fee']} | Drive: {drive_time*60:.0f}m")
+            path.append(target)
+            current_loc = target
+            unvisited.remove(target)
+
+        return path, total_cost, time_spent, log
+
+    def brute_force_search(self, budget, max_hours, interests):
+        best_route, highest_score = [], -1
+        for length in range(1, len(LOCATIONS) + 1):
+            for sequence in itertools.permutations(LOCATIONS, length):
+                price = sum(loc["fee"] for loc in sequence)
+                if price > budget: continue
+                
+                duration = STAY_TIME * length
+                duration += sum(self.get_duration(sequence[i-1], sequence[i]) for i in range(1, len(sequence)))
+                
+                if duration <= max_hours:
+                    score = sum(self.get_utility(loc, interests) for loc in sequence)
+                    if score > highest_score:
+                        highest_score, best_route = score, list(sequence)
+        return best_route
+
+class KathmanduPlannerGUI:
+    def __init__(self, window):
+        self.window = window
+        self.engine = ItineraryEngine()
+        window.title("Kathmandu Trip Optimizer")
+        window.geometry("900x750")
+        self._setup_widgets()
+
+    def _setup_widgets(self):
+        tk.Label(self.window, text="Kathmandu Trip Planner", font=("Arial", 16, "bold"), pady=10).pack()
+        
+        input_frame = tk.Frame(self.window)
+        input_frame.pack(pady=5)
+        
+        self.bud_ent = tk.Entry(input_frame, width=10); self.bud_ent.insert(0, "800")
+        self.hr_ent = tk.Entry(input_frame, width=10); self.hr_ent.insert(0, "6")
+        self.int_ent = tk.Entry(input_frame, width=20); self.int_ent.insert(0, "culture,nature")
+        
+        tk.Label(input_frame, text="Budget (NPR):").pack(side=tk.LEFT)
+        self.bud_ent.pack(side=tk.LEFT, padx=5)
+        tk.Label(input_frame, text="Hours:").pack(side=tk.LEFT)
+        self.hr_ent.pack(side=tk.LEFT, padx=5)
+        tk.Label(input_frame, text="Interests:").pack(side=tk.LEFT)
+        self.int_ent.pack(side=tk.LEFT, padx=5)
+
+        btn_frame = tk.Frame(self.window)
+        btn_frame.pack(pady=10)
+        tk.Button(btn_frame, text="Run Greedy", command=self.handle_greedy, bg="lightblue").pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Compare Brute Force", command=self.handle_compare).pack(side=tk.LEFT, padx=5)
+
+        self.console = tk.Text(self.window, height=10, font=("Consolas", 10), state=tk.DISABLED)
+        self.console.pack(fill=tk.X, padx=15)
+
+        self.fig, self.ax = plt.subplots(figsize=(8, 4))
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.window)
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
+
+    def _display(self, msg):
+        self.console.config(state=tk.NORMAL)
+        self.console.delete("1.0", tk.END)
+        self.console.insert(tk.END, msg)
+        self.console.config(state=tk.DISABLED)
+
+    def _plot(self, path, title):
+        self.ax.clear()
+        if path:
+            x = [p["lon"] for p in path]
+            y = [p["lat"] for p in path]
+            self.ax.plot(x, y, "r-d", markersize=8)
+            for idx, p in enumerate(path):
+                self.ax.text(p["lon"], p["lat"], f" {idx+1}. {p['name']}")
+        self.ax.set_title(title)
+        self.ax.grid(True, linestyle='--', alpha=0.6)
+        self.canvas.draw()
+
+    def handle_greedy(self):
+        b, h = float(self.bud_ent.get()), float(self.hr_ent.get())
+        tags = [t.strip() for t in self.int_ent.get().split(",")]
+        res, cost, time, logs = self.engine.greedy_search(b, h, tags)
+        
+        output = [f"--- Greedy Plan (Budget: {b}, Time: {h}h) ---\n"]
+        output.extend([f"Stop {i+1}: {s['name']}\n" for i, s in enumerate(res)])
+        output.append(f"\nTotal NPR: {cost} | Total Time: {time:.2f}h")
+        self._display("".join(output))
+        self._plot(res, "Optimized Route")
+
+    def handle_compare(self):
+        b, h = float(self.bud_ent.get()), float(self.hr_ent.get())
+        tags = [t.strip() for t in self.int_ent.get().split(",")]
+        g_path, g_cost, g_time, _ = self.engine.greedy_search(b, h, tags)
+        b_path = self.engine.brute_force_search(b, h, tags)
+        
+        compare_txt = (
+            f"Comparison Result:\n"
+            f"Metric          Greedy      Brute Force\n"
+            f"Spots:          {len(g_path):<12} {len(b_path):<12}\n"
+            f"Total NPR:      {g_cost:<12} {sum(s['fee'] for s in b_path):<12}\n"
+        )
+        self._display(compare_txt)
+        self._plot(g_path, "Greedy Path Selection")
+
+if __name__ == "__main__":
+    app_root = tk.Tk()
+    KathmanduPlannerGUI(app_root)
+    app_root.mainloop()
+
+
+    
