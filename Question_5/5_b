@@ -1,0 +1,157 @@
+import threading
+import queue
+import time
+import tkinter as tk
+from tkinter import ttk
+import requests
+import matplotlib
+matplotlib.use("TkAgg")
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+# Configuration and Endpoints
+WEATHER_SERVICE_URL = "https://api.openweathermap.org/data/2.5/weather"
+API_TOKEN = "YOUR_OPENWEATHERMAP_API_KEY" # Placeholder for actual key
+
+NEPAL_LOCATIONS = [
+    {"name": "Kathmandu", "lat": 27.7172, "lon": 85.3240},
+    {"name": "Pokhara", "lat": 28.2096, "lon": 83.9856},
+    {"name": "Biratnagar", "lat": 26.4525, "lon": 87.2718},
+    {"name": "Nepalgunj", "lat": 28.0500, "lon": 81.6167},
+    {"name": "Dhangadhi", "lat": 28.7000, "lon": 80.5833},
+] 
+
+def execute_api_call(city_data, comms_queue, sync_lock):
+    try:
+        query_params = {
+            "lat": city_data["lat"], 
+            "lon": city_data["lon"],
+            "appid": API_TOKEN, 
+            "units": "metric"
+        }
+        response = requests.get(WEATHER_SERVICE_URL, params=query_params, timeout=8)
+        payload = response.json()
+        
+        report = {
+            "name": city_data["name"],
+            "temperature": payload["main"]["temp"],
+            "humidity": payload["main"]["humidity"],
+            "pressure": payload["main"]["pressure"],
+            "condition": payload["weather"][0]["description"].capitalize(),
+            "status": "Success"
+        }
+    except Exception as error:
+        report = {"name": city_data["name"], "status": "Failed", "message": str(error)}
+
+    with sync_lock:
+        comms_queue.put(report)
+
+class WeatherDashboard:
+    def __init__(self, root_window):
+        self.window = root_window
+        self.window.title("Nepal Weather Analytics")
+        self.window.geometry("850x650")
+        
+        self.data_queue = queue.Queue()
+        self.thread_lock = threading.Lock()
+        
+        self.concurrent_duration = None
+        self.sequential_duration = None
+        
+        self._initialize_interface()
+
+    def _initialize_interface(self):
+        tk.Label(self.window, text="Nepal Meteorological Dashboard", font=("Arial", 15, "bold")).pack(pady=10)
+        
+        control_panel = tk.Frame(self.window)
+        control_panel.pack(pady=5)
+        
+        tk.Button(control_panel, text="Concurrent Sync", command=self.run_concurrent).pack(side=tk.LEFT, padx=10)
+        tk.Button(control_panel, text="Sequential Sync", command=self.run_sequential).pack(side=tk.LEFT, padx=10)
+        
+        self.info_label = tk.StringVar(value="System Idle")
+        tk.Label(self.window, textvariable=self.info_label, font=("Arial", 10, "italic")).pack()
+
+        table_cols = ("Location", "Temp (°C)", "Humidity (%)", "Pressure (hPa)", "Conditions")
+        self.data_grid = ttk.Treeview(self.window, columns=table_cols, show="headings", height=6)
+        for col in table_cols:
+            self.data_grid.heading(col, text=col)
+            self.data_grid.column(col, width=150, anchor="center")
+        self.data_grid.pack(fill=tk.X, padx=15, pady=10)
+
+        self.figure, self.axis = plt.subplots(figsize=(7, 3))
+        self.graph_widget = FigureCanvasTkAgg(self.figure, master=self.window)
+        self.graph_widget.get_tk_widget().pack(fill=tk.BOTH, padx=15, pady=5)
+
+    def _refresh_grid(self, entry):
+        if entry["status"] == "Success":
+            self.data_grid.insert("", tk.END, values=(
+                entry["name"], f"{entry['temperature']:.1f}", 
+                entry["humidity"], entry["pressure"], entry["condition"]
+            ))
+        else:
+            self.data_grid.insert("", tk.END, values=(entry["name"], "---", "---", "---", entry["message"]))
+
+    def run_concurrent(self):
+        for item in self.data_grid.get_children(): self.data_grid.delete(item)
+        self.info_label.set("Executing Parallel Threads...")
+        
+        timer_start = time.perf_counter()
+        active_threads = []
+        
+        for city in NEPAL_LOCATIONS:
+            worker = threading.Thread(target=execute_api_call, args=(city, self.data_queue, self.thread_lock), daemon=True)
+            active_threads.append(worker)
+            worker.start()
+
+        def monitor_threads():
+            while not self.data_queue.empty():
+                self._refresh_grid(self.data_queue.get_nowait())
+            
+            if any(w.is_alive() for w in active_threads):
+                self.window.after(100, monitor_threads)
+            else:
+                self.concurrent_duration = time.perf_counter() - timer_start
+                self.info_label.set(f"Concurrent completed in {self.concurrent_duration:.2f}s")
+                self._update_analytics()
+
+        self.window.after(100, monitor_threads)
+
+    def run_sequential(self):
+        for item in self.data_grid.get_children(): self.data_grid.delete(item)
+        self.info_label.set("Executing Serial Requests...")
+        
+        timer_start = time.perf_counter()
+        temp_queue = queue.Queue()
+        
+        for city in NEPAL_LOCATIONS:
+            execute_api_call(city, temp_queue, self.thread_lock)
+            self._refresh_grid(temp_queue.get())
+            self.window.update()
+            
+        self.sequential_duration = time.perf_counter() - timer_start
+        self.info_label.set(f"Sequential completed in {self.sequential_duration:.2f}s")
+        self._update_analytics()
+
+    def _update_analytics(self):
+        self.axis.clear()
+        categories, measurements = [], []
+        if self.sequential_duration:
+            categories.append("Sequential"); measurements.append(self.sequential_duration)
+        if self.concurrent_duration:
+            categories.append("Concurrent"); measurements.append(self.concurrent_duration)
+            
+        if measurements:
+            self.axis.bar(categories, measurements, color=['#ff9999', '#66b3ff'], width=0.4)
+            self.axis.set_ylabel("Latency (Seconds)")
+            self.axis.set_title("Performance Comparison: Sync vs Threaded")
+            self.figure.tight_layout()
+            self.graph_widget.draw()
+
+# Testing and Validation Starts Here
+if __name__ == "__main__":
+    main_app = tk.Tk()
+    WeatherDashboard(main_app)
+    main_app.mainloop()
+
+    
