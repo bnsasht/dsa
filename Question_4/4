@@ -1,0 +1,96 @@
+class EnergyGridManager:
+    def __init__(self, sources, demand_data, districts, shortfall_limit=0.10):
+        self.power_sources = sources
+        self.hourly_demand = demand_data
+        self.district_list = districts
+        self.tolerance = shortfall_limit
+        self.stats = {"cost": 0.0, "green_energy": 0.0, "total_energy": 0.0, "diesel_times": []}
+
+    def _get_active_inventory(self, time_of_day):
+        active = [s for s in self.power_sources if s['start'] <= time_of_day < s['end']]
+        return sorted(active, key=lambda x: x['cost'])
+
+    def process_hour(self, hour):
+        active_sources = self._get_active_inventory(hour)
+        load = self.hourly_demand[hour]
+        
+        allocation = {s['id']: 0.0 for s in self.power_sources}
+        remaining_need = {d: load[d] for d in self.district_list}
+        expense = 0.0
+
+        for src in active_sources:
+            available_cap = src['cap']
+            for zone in self.district_list:
+                if remaining_need[zone] <= 0 or available_cap <= 0:
+                    continue
+                
+                dispatch = min(remaining_need[zone], available_cap)
+                allocation[src['id']] += dispatch
+                remaining_need[zone] -= dispatch
+                available_cap -= dispatch
+                expense += dispatch * src['cost']
+
+        # Integrity Check: Ensure shortfall doesn't exceed the 10% tolerance
+        for zone in self.district_list:
+            if remaining_need[zone] > load[zone] * self.tolerance:
+                print(f"![ALARM] Hour {hour} Zone {zone}: Shortfall {remaining_need[zone]:.1f} exceeds limit.")
+
+        return allocation, expense
+
+    def execute_simulation(self):
+        header = f"{'Hour':<6}{'Zone':<6}{'Solar':>8}{'Hydro':>8}{'Diesel':>8}{'Total':>7}{'Goal':>8}{'%Met':>7}"
+        print(f"\n{header}\n" + "-" * 62)
+
+        for hr in sorted(self.hourly_demand.keys()):
+            usage, hr_cost = self.process_hour(hr)
+            self.stats["cost"] += hr_cost
+            
+            if usage['S3'] > 0:
+                self.stats["diesel_times"].append(hr)
+
+            total_hr_load = sum(self.hourly_demand[hr].values())
+
+            for zone in self.district_list:
+                ratio = self.hourly_demand[hr][zone] / total_hr_load
+                s_gen = round(usage['S1'] * ratio, 1)
+                h_gen = round(usage['S2'] * ratio, 1)
+                d_gen = round(usage['S3'] * ratio, 1)
+                
+                sum_gen = s_gen + h_gen + d_gen
+                met_pct = min(100.0, round(sum_gen / self.hourly_demand[hr][zone] * 100, 1))
+                
+                print(f"{hr:<6}{zone:<6}{s_gen:>8.1f}{h_gen:>8.1f}{d_gen:>8.1f}{sum_gen:>7.1f}{self.hourly_demand[hr][zone]:>8.1f}{met_pct:>6.1f}%")
+                
+                self.stats["total_energy"] += sum_gen
+                self.stats["green_energy"] += (s_gen + h_gen)
+
+        renew_pct = (self.stats["green_energy"] / self.stats["total_energy"] * 100) if self.stats["total_energy"] else 0
+        
+        print("=" * 62)
+        print(f"Cumulative System Cost : Rs. {self.stats['cost']:.2f}")
+        print(f"Renewable Contribution : {renew_pct:.1f}%")
+        print(f"Diesel Activation Hrs : {list(set(self.stats['diesel_times'])) or 'None'}")
+
+# Testing and Validation Starts Here
+if __name__ == "__main__":
+    # Cleaned up Demand Dictionary
+    DEMAND_CHART = {
+        6:  {'A': 20, 'B': 15, 'C': 25},
+        7:  {'A': 22, 'B': 16, 'C': 28},
+        8:  {'A': 25, 'B': 18, 'C': 30},
+        9:  {'A': 28, 'B': 20, 'C': 32},
+        10: {'A': 30, 'B': 22, 'C': 35},
+        17: {'A': 35, 'B': 28, 'C': 40},
+        18: {'A': 38, 'B': 30, 'C': 42}
+    }
+
+    POWER_STATIONS = [
+        {'id': 'S1', 'type': 'Solar',  'cap': 50, 'start': 6,  'end': 18, 'cost': 1.0},
+        {'id': 'S2', 'type': 'Hydro',  'cap': 40, 'start': 0,  'end': 24, 'cost': 1.5},
+        {'id': 'S3', 'type': 'Diesel', 'cap': 60, 'start': 17, 'end': 23, 'cost': 3.0}
+    ]
+
+    manager = EnergyGridManager(POWER_STATIONS, DEMAND_CHART, ['A', 'B', 'C'])
+    manager.execute_simulation()
+
+    
