@@ -1,0 +1,78 @@
+from collections import defaultdict, deque
+
+class LogisticsNetworkManager:
+    def __init__(self, capacity_map):
+        self.original_graph = capacity_map
+        self.residual_network = defaultdict(dict)
+        self._initialize_residual()
+
+    def _initialize_residual(self):
+        for u in self.original_graph:
+            for v, capacity in self.original_graph[u].items():
+                self.residual_network[u][v] = capacity
+                if u not in self.residual_network[v]:
+                    self.residual_network[v][u] = 0
+
+    def find_augmenting_path(self, source, sink):
+        parent = {source: None}
+        search_queue = deque([source])
+        
+        while search_queue:
+            u = search_queue.popleft()
+            for v, capacity in self.residual_network[u].items():
+                if v not in parent and capacity > 0:
+                    parent[v] = u
+                    search_queue.append(v)
+                    if v == sink:
+                        return parent
+        return None
+
+    def calculate_max_flow(self, source, sink):
+        total_flow = 0
+        
+        while True:
+            path_map = self.find_augmenting_path(source, sink)
+            if not path_map:
+                break
+                
+            # Determine bottleneck capacity along the BFS path
+            bottleneck = float('inf')
+            current = sink
+            while current != source:
+                prev = path_map[current]
+                bottleneck = min(bottleneck, self.residual_network[prev][current])
+                current = prev
+            
+            # Update residual graph capacities
+            current = sink
+            while current != source:
+                prev = path_map[current]
+                self.residual_network[prev][current] -= bottleneck
+                self.residual_network[current][prev] += bottleneck
+                current = prev
+                
+            total_flow += bottleneck
+            
+        return total_flow
+
+# Capacity Graph Data (Nepalese Transport Network) 
+CAPACITY_DATA = {
+    'KTM': {'JA': 10, 'JB': 15},
+    'JA':  {'KTM': 10, 'PH': 8, 'BS': 5},
+    'JB':  {'KTM': 15, 'JA': 4, 'BS': 12},
+    'PH':  {'JA': 8, 'BS': 6},
+    'BS':  {'JA': 5, 'JB': 12, 'PH': 6},
+}
+
+if __name__ == "__main__":
+    manager = LogisticsNetworkManager(CAPACITY_DATA)
+    max_trucks = manager.calculate_max_flow('KTM', 'BS')
+    
+    # Validation against Min-Cut Theorem
+    min_cut_value = 5 + 12 + 6  # JA->BS + JB->BS + PH->BS
+    
+    print(f"=== Maximum Logistics Flow Analysis ===")
+    print(f"Source: KTM | Destination: BS")
+    print(f"Calculated Max Flow: {max_trucks} trucks/hour")
+    print(f"Theoretical Min-Cut: {min_cut_value}")
+    print(f"Max-Flow Min-Cut Theorem Verified: {max_trucks == min_cut_value}")

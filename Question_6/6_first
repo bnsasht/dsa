@@ -1,0 +1,61 @@
+import heapq
+import math
+
+class NetworkSafetyOptimizer:
+    def __init__(self, probability_map):
+        self.graph = probability_map
+
+    def find_safest_routes(self, start_node):
+        node_costs = {node: float('inf') for node in self.graph}
+        predecessors = {node: None for node in self.graph}
+        
+        node_costs[start_node] = 0.0
+        priority_queue = [(0.0, start_node)]
+
+        while priority_queue:
+            current_cost, u = heapq.heappop(priority_queue)
+
+            if current_cost > node_costs[u]:
+                continue
+
+            for v, probability in self.graph[u]:
+                edge_weight = -math.log(probability)
+                total_path_cost = current_cost + edge_weight
+
+                if total_path_cost < node_costs[v]:
+                    node_costs[v] = total_path_cost
+                    predecessors[v] = u
+                    heapq.heappush(priority_queue, (total_path_cost, v))
+
+        return node_costs, predecessors
+
+    def get_path(self, predecessors, start, end):
+        route = []
+        current = end
+        while current is not None:
+            route.append(current)
+            current = predecessors[current]
+        
+        route.reverse()
+        return route if (route and route[0] == start) else []
+
+# -- Testing starts --
+if __name__ == "__main__":
+    TRANSPORT_NETWORK = {
+        'KTM': [('JA', 0.90), ('JB', 0.80)],
+        'JA':  [('KTM', 0.90), ('PH', 0.95), ('BS', 0.70)],
+        'JB':  [('KTM', 0.80), ('JA', 0.60), ('BS', 0.90)],
+        'PH':  [('JA', 0.95), ('BS', 0.85)],
+        'BS':  [('JA', 0.70), ('JB', 0.90), ('PH', 0.85)],
+    }
+
+    optimizer = NetworkSafetyOptimizer(TRANSPORT_NETWORK)
+    costs, parents = optimizer.find_safest_routes('KTM')
+
+    print("=== Optimal Safety Routes from Kathmandu (KTM) ===")
+    for destination in ['JA', 'JB', 'PH', 'BS']:
+        total_safety = math.exp(-costs[destination])
+        path_taken = optimizer.get_path(parents, 'KTM', destination)
+        print(f"Destination: {destination:<3} | Safety Score: {total_safety:.4f} | Path: {' -> '.join(path_taken)}")
+
+        
